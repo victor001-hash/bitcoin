@@ -258,6 +258,9 @@ public:
     // BlockConflicted.
     std::set<Txid> mempool_conflicts;
 
+    // Set of v3 transactions that spend from this tx
+    std::optional<Txid> v3_spend;
+
     template<typename Stream>
     void Serialize(Stream& s) const
     {

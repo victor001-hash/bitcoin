@@ -65,6 +65,7 @@ class WalletV3Test(BitcoinTestFramework):
 
         self.v3_tx_spends_unconfirmed_v2_tx()
         self.v3_utxos_appear_in_listunspent()
+        self.truc_tx_with_conflicting_sibling()
 
     @cleanup
     def v3_tx_spends_unconfirmed_v2_tx(self):
@@ -106,6 +107,43 @@ class WalletV3Test(BitcoinTestFramework):
         parent_tx = self.alice.sendrawtransaction(parent_tx["hex"])
         self.sync_mempools()
         assert_equal(self.bob.listunspent(minconf=0)[0]["txid"], parent_tx)
+
+    @cleanup
+    def truc_tx_with_conflicting_sibling(self):
+        # unconfirmed v3 tx to alice & bob
+        self.log.info("Test v3 transaction with conflicting sibling")
+        self.generate(self.nodes[0], 1)
+
+        inputs=[]
+        outputs = {self.bob.getnewaddress() : 2.0}
+        parent_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=3)
+        parent_tx = self.alice.fundrawtransaction(parent_tx)
+        parent_tx = self.alice.signrawtransactionwithwallet(parent_tx["hex"])
+        self.alice.sendrawtransaction(parent_tx["hex"])
+        self.sync_mempools()
+        parent_txid = self.alice.getrawmempool()[0]
+
+        # alice spends her output with a v3 transaction
+        alice_unspent = self.alice.listunspent(minconf=0)[0]
+        inputs=[{'txid' : parent_txid, 'vout' : alice_unspent['vout']},]
+        outputs = {self.alice.getnewaddress() : alice_unspent['amount'] - Decimal(0.00000120)} # two outputs
+        alice_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=3)
+        alice_tx = self.alice.signrawtransactionwithwallet(alice_tx)
+
+        self.alice.sendrawtransaction(alice_tx["hex"])
+        self.sync_mempools()
+
+        # bob tries to spend money
+        inputs=[]
+        outputs = {self.bob.getnewaddress() : 1.999}
+        bob_tx = self.bob.createrawtransaction(inputs=inputs, outputs=outputs, version=3)
+
+        assert_raises_rpc_error(
+            -4,
+            "Insufficient funds",
+            self.bob.fundrawtransaction,
+            bob_tx, {'include_unsafe': True}
+        )
 
 if __name__ == '__main__':
     WalletV3Test(__file__).main()
