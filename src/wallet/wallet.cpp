@@ -1403,8 +1403,21 @@ void CWallet::transactionAddedToMempool(const CTransactionRef& tx) {
         for (const CTxIn& tx_in : tx->vin) {
             auto wallet_it = mapWallet.find(tx_in.prevout.hash);
             if (wallet_it != mapWallet.end()) {
-                if (wallet_it->second.isUnconfirmed()) {
-                    wallet_it->second.v3_spend = tx->GetHash();
+                CWalletTx& wtx = wallet_it->second;
+                if (wtx.tx->version == TRUC_VERSION && wtx.isUnconfirmed()) {
+                    wtx.v3_spend = tx->GetHash();
+                    // for each transaction in our wallet that
+                    // spends from this now v3-conflicted transaction
+                    for (long unsigned int i = 0; i < wtx.tx->vout.size(); i++) {
+                        if (i == tx_in.prevout.n) continue;
+                        for (auto range = mapTxSpends.equal_range(COutPoint(tx->GetHash(), i)); range.first != range.second; range.first++) {
+                            const auto mit = mapWallet.find(range.first->second);
+                            if (mit != mapWallet.end()) {
+                                mit->second.mempool_conflicts.insert(tx->GetHash());
+                            }
+
+                        }
+                    }
                 }
             }
         }
@@ -1467,8 +1480,20 @@ void CWallet::transactionRemovedFromMempool(const CTransactionRef& tx, MemPoolRe
         for (const CTxIn& tx_in : tx->vin) {
             auto wallet_it = mapWallet.find(tx_in.prevout.hash);
             if (wallet_it != mapWallet.end()) {
-                if (wallet_it->second.v3_spend == tx->GetHash()) {
-                    wallet_it->second.v3_spend = std::nullopt;
+                CWalletTx& wtx = wallet_it->second;
+                if (wtx.v3_spend == tx->GetHash()) {
+                    wtx.v3_spend = std::nullopt;
+
+                    for (long unsigned int i = 0; i < wtx.tx->vout.size(); i++) {
+                        if (i == tx_in.prevout.n) continue;
+                        for (auto range = mapTxSpends.equal_range(COutPoint(tx->GetHash(), i)); range.first != range.second; range.first++) {
+                            const auto mit = mapWallet.find(range.first->second);
+                            if (mit != mapWallet.end()) {
+                                mit->second.mempool_conflicts.erase(tx->GetHash());
+                            }
+
+                        }
+                    }
                 }
             }
         }
