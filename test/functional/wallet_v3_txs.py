@@ -66,6 +66,8 @@ class WalletV3Test(BitcoinTestFramework):
         self.v3_tx_spends_unconfirmed_v2_tx()
         self.v3_utxos_appear_in_listunspent()
         self.truc_tx_with_conflicting_sibling()
+        self.spend_v3_input_with_v2()
+        self.spend_v2_input_with_v3()
 
     @cleanup
     def v3_tx_spends_unconfirmed_v2_tx(self):
@@ -143,6 +145,60 @@ class WalletV3Test(BitcoinTestFramework):
             "Insufficient funds",
             self.bob.fundrawtransaction,
             bob_tx, {'include_unsafe': True}
+        )
+
+    @cleanup
+    def spend_v3_input_with_v2(self):
+        self.log.info("Test spending a pre-selected v3 input with a v2 transaction")
+        self.generate(self.nodes[0], 1)
+
+        inputs=[]
+        outputs = {self.bob.getnewaddress() : 2.0}
+        parent_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=3)
+        parent_tx = self.alice.fundrawtransaction(parent_tx)
+        parent_tx = self.alice.signrawtransactionwithwallet(parent_tx["hex"])
+        self.alice.sendrawtransaction(parent_tx["hex"])
+        self.sync_mempools()
+        parent_txid = self.alice.getrawmempool()[0]
+
+        # alice spends her output with a v3 transaction
+        alice_unspent = self.alice.listunspent(minconf=0)[0]
+        inputs=[{'txid' : parent_txid, 'vout' : alice_unspent['vout']},]
+        outputs = {self.alice.getnewaddress() : alice_unspent['amount'] - Decimal(0.00000120)} # two outputs
+        alice_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=2)
+
+        assert_raises_rpc_error(
+            -4,
+            "Can't spend unconfirmed version 3 pre-selected input with a version 2 tx",
+            self.alice.fundrawtransaction,
+            alice_tx
+        )
+
+    @cleanup
+    def spend_v2_input_with_v3(self):
+        self.log.info("Test spending a pre-selected v2 input with a v3 transaction")
+        self.generate(self.nodes[0], 1)
+
+        inputs=[]
+        outputs = {self.bob.getnewaddress() : 2.0}
+        parent_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=2)
+        parent_tx = self.alice.fundrawtransaction(parent_tx)
+        parent_tx = self.alice.signrawtransactionwithwallet(parent_tx["hex"])
+        self.alice.sendrawtransaction(parent_tx["hex"])
+        self.sync_mempools()
+        parent_txid = self.alice.getrawmempool()[0]
+
+        # alice spends her output with a v3 transaction
+        alice_unspent = self.alice.listunspent(minconf=0)[0]
+        inputs=[{'txid' : parent_txid, 'vout' : alice_unspent['vout']},]
+        outputs = {self.alice.getnewaddress() : alice_unspent['amount'] - Decimal(0.00000120)} # two outputs
+        alice_tx = self.alice.createrawtransaction(inputs=inputs, outputs=outputs, version=3)
+
+        assert_raises_rpc_error(
+            -4,
+            "Can't spend unconfirmed version 2 pre-selected input with a version 3 tx",
+            self.alice.fundrawtransaction,
+            alice_tx
         )
 
 if __name__ == '__main__':
