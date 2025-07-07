@@ -42,6 +42,7 @@ const std::string FLAGS{"flags"};
 const std::string HDCHAIN{"hdchain"};
 const std::string KEYMETA{"keymeta"};
 const std::string KEY{"key"};
+const std::string LAST_DECRYPTED_VERSION{"versionlastdecrypt"};
 const std::string LOCKED_UTXO{"lockedutxo"};
 const std::string MASTER_KEY{"mkey"};
 const std::string MINVERSION{"minversion"};
@@ -1136,6 +1137,11 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
     bool has_last_client = m_batch->Read(DBKeys::VERSION, last_client);
     if (has_last_client) pwallet->WalletLogPrintf("Last client version = %d\n", last_client);
 
+    // Last client version to decrypt this wallet
+    if (int last_decrypted; m_batch->Read(DBKeys::LAST_DECRYPTED_VERSION, last_decrypted)) {
+        pwallet->SetLastDecryptedVersion(last_decrypted);
+    }
+
     try {
         if ((result = LoadMinVersion(pwallet, *m_batch)) != DBErrors::LOAD_OK) return result;
 
@@ -1188,9 +1194,6 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
     if (result != DBErrors::LOAD_OK)
         return result;
 
-    if (!has_last_client || last_client != CLIENT_VERSION) // Update
-        m_batch->Write(DBKeys::VERSION, CLIENT_VERSION);
-
     if (any_unordered)
         result = pwallet->ReorderTransactions();
 
@@ -1215,6 +1218,14 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
             }
         }
         pwallet->mapMasterKeys.clear();
+    }
+
+
+    // Record the current client version as the last version to successfully open this wallet file
+    // This must always be done after all automatic upgrades so that those upgrades can be performed
+    // in an upgrade-downgrade-upgrade scenario.
+    if (!has_last_client || last_client != CLIENT_VERSION) {
+        m_batch->Write(DBKeys::VERSION, CLIENT_VERSION);
     }
 
     return result;
@@ -1275,6 +1286,11 @@ bool WalletBatch::EraseAddressData(const CTxDestination& dest)
 bool WalletBatch::WriteWalletFlags(const uint64_t flags)
 {
     return WriteIC(DBKeys::FLAGS, flags);
+}
+
+bool WalletBatch::WriteLastDecryptedVersion()
+{
+    return WriteIC(DBKeys::LAST_DECRYPTED_VERSION, CLIENT_VERSION);
 }
 
 bool WalletBatch::EraseRecords(const std::unordered_set<std::string>& types)
