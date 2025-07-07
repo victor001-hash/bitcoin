@@ -12,6 +12,7 @@
 #include <node/types.h>
 #include <numeric>
 #include <policy/policy.h>
+#include <policy/truc_policy.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <script/signingprovider.h>
@@ -282,6 +283,16 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
             if (input_bytes == -1) {
                 input_bytes = CalculateMaximumSignedInputSize(txout, &wallet, &coin_control);
             }
+            auto it = wallet.mapWallet.find(outpoint.hash);
+            if (coin_control.m_version.has_value() && it != wallet.mapWallet.end()) {
+                if (wallet.GetTxDepthInMainChain(it->second) == 0) {
+                    if (it->second.tx->version == TRUC_VERSION && coin_control.m_version != TRUC_VERSION) {
+                        return util::Error{strprintf(_("Can't spend unconfirmed version 3 pre-selected input with a version %d tx"), coin_control.m_version.value())};
+                    } else if (coin_control.m_version == TRUC_VERSION && it->second.tx->version != TRUC_VERSION) {
+                        return util::Error{strprintf(_("Can't spend unconfirmed version %d pre-selected input with a version 3 tx"), it->second.tx->version)};
+                    }
+                }
+            }
         } else {
             // The input is external. We did not find the tx in mapWallet.
             const auto out{coin_control.GetExternalOutput(outpoint)};
@@ -386,6 +397,15 @@ CoinsResult AvailableCoins(const CWallet& wallet,
                 safeTx = false;
             }
 
+            if (nDepth == 0 && params.track_version) {
+                if (coinControl->m_version == TRUC_VERSION) {
+                    if (wtx.tx->version != TRUC_VERSION) continue;
+                    if (wtx.v3_spend.has_value()) continue; // this unconfirmed v3 transaction already has a child
+                } else {
+                    if (wtx.tx->version == TRUC_VERSION) continue;
+                }
+            }
+
             if (only_safe && !safeTx) {
                 continue;
             }
@@ -484,6 +504,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
 CoinsResult AvailableCoinsListUnspent(const CWallet& wallet, const CCoinControl* coinControl, CoinFilterParams params)
 {
     params.only_spendable = false;
+    params.track_version = false;
     return AvailableCoins(wallet, coinControl, /*feerate=*/ std::nullopt, params);
 }
 
